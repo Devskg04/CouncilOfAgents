@@ -49,41 +49,40 @@ class FactorExtractionAgent(BaseAgent):
         
         prompt = f"""You are the Factor Extraction Agent inside Project AETHER.
 
-CRITICAL RULE: Extract ONLY factors that appear EXPLICITLY in the document with EXACT QUOTES.
+FORMAL FACTOR DEFINITION:
+A factor = ONE distinct statement about a world-state (what IS, CHANGED, or EXISTS).
 
-STRICT REQUIREMENTS:
-1. You MUST provide an exact quote from the document for each factor
-2. Do NOT infer, extrapolate, or add external knowledge
-3. Do NOT extract factors based on "reasonable assumptions" or "implied" concepts
-4. If a concept is not explicitly mentioned in the document, do NOT include it
-5. The factor name and description must be derived ONLY from the quoted text
-6. Do NOT create "Analytically Rejected Factor" entries - extract only what exists
+CRITICAL ANTI-SPLITTING RULE:
+If statements describe THE SAME world-state → ONE factor (not multiple).
 
-For each factor, you MUST provide:
-- QUOTE: Exact verbatim text from the document (copy-paste)
-- NAME: Short name derived ONLY from the quote
-- DESCRIPTION: Explanation using ONLY information in the quote
+Example of WRONG (splitting):
+❌ Factor 1: "Earth orbit"
+❌ Factor 2: "Full revolution"  
+❌ Factor 3: "Year 2020"
+
+Example of CORRECT (merged):
+✅ Factor 1: "Earth completed one full orbital revolution in 2020"
+
+WHAT TO EXTRACT:
+✅ Substantive world-states (events, changes, conditions that matter)
+❌ Background trivia (year mentioned, location, general context)
+❌ Meta-information (critiques, lack of evidence, interpretations)
+
+MANDATORY CHECKS BEFORE EXTRACTING:
+1. Does this describe a DISTINCT world-state? (not a piece of another factor)
+2. Is this SUBSTANTIVE? (not background noise like "in 2020" or "the Sun")
+3. Is this DECISION-RELEVANT? (affects understanding or evaluation)
+
+If NO to any → DO NOT extract.
+
+For simple content (1-2 sentences): Extract 1 factor ONLY.
+For complex documents: Extract 3-8 factors.
 
 Document:
 {input_text}
 
-Output as JSON array with this EXACT structure:
-[
-  {{
-    "id": 1,
-    "quote": "exact verbatim text from document",
-    "name": "Factor Name (from quote only)",
-    "description": "Explanation using only quote content"
-  }},
-  {{
-    "id": 2,
-    "quote": "another exact quote",
-    "name": "Another Factor",
-    "description": "Description from quote only"
-  }}
-]
-
-Extract 3-8 factors. Each MUST have a verifiable quote from the document.
+Output JSON:
+[{{"id": 1, "quote": "exact full sentence", "name": "Complete world-state", "description": "What happened/exists"}}]
 """
 
         response = await self.llm_client.generate(prompt)
@@ -178,7 +177,7 @@ Extract 3-8 factors. Each MUST have a verifiable quote from the document.
                 continue
             
             # Match numbered list patterns
-            match = re.match(r'^(\d+)[\.\)]\s*(.+?)(?:[:]\s*(.+))?$', line)
+            match = re.match(r'^(\d+)[\.\)]\s*(.+?)(?:[:]\\s*(.+))?$', line)
             if match:
                 num, name, desc = match.groups()
                 factors.append({

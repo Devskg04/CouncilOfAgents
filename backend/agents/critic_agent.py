@@ -78,6 +78,10 @@ class CriticAgent(BaseAgent):
         """Generate critique for a factor and its support argument. Creates structured Claim."""
         self.current_input_text = input_text
         
+        # Detect context size for mode selection
+        context_size = len(input_text.strip())
+        is_small_context = context_size < 500
+        
         # Extract supporting agent's claim if available
         support_claim_data = support_argument.get('claim')
         has_evidence = support_argument.get('has_evidence', True)
@@ -97,19 +101,59 @@ class CriticAgent(BaseAgent):
                 has_concession = True
                 break
         
+        # Check if this is a simple descriptive fact (before LLM call)
+        context_size = len(input_text.strip())
+        is_small_context = context_size < 500
+        
+        factor_desc = factor.get('description', '').lower()
+        factor_name = factor.get('name', '').lower()
+        
+        # Detect if factor makes causal claim
+        causal_keywords = ['caused', 'led to', 'resulted in', 'because', 'due to', 'therefore', 'thus', 'consequently']
+        is_causal_claim = any(keyword in factor_desc or keyword in factor_name for keyword in causal_keywords)
+        
+        # Build context-aware prompt
+        if is_small_context:
+            mode_instruction = """CONTEXT MODE: SMALL/TRIVIAL STATEMENT
+- You may use general knowledge and common sense for evaluation
+- The statement is too brief for deep documentary analysis
+- Apply logical reasoning and well-established facts
+- CRITICAL: Do NOT hallucinate or invent counter-facts
+- If using general knowledge, state it explicitly: "Based on general knowledge..."
+- Still prefer document-based critique when possible"""
+        else:
+            mode_instruction = """CONTEXT MODE: SUBSTANTIAL DOCUMENT
+- You MUST critique using ONLY information from the document
+- Do NOT use external knowledge or assumptions
+- Every critique must reference document content
+- CRITICAL: Do NOT hallucinate or add information not in the document"""
+        
         prompt = f"""You are the Critic Agent inside Project AETHER. Your role is to stress-test each factor and, when appropriate, reject it outright.
 
+{mode_instruction}
+
 STRICT RULES:
-- You must challenge both factual accuracy and moral validity when applicable.
-- If a factor relies on historically falsified claims, genocide, crimes against humanity, or extremist/totalitarian narratives, you MUST explicitly label it as an "Analytically Rejected Factor" and explain why.
-- Do NOT simulate false balance: if the evidence clearly invalidates a factor, say so directly.
-- If the Supporting Agent provided INSUFFICIENT_EVIDENCE, you MUST REJECT the factor.
-- If the factor is circular reasoning (outcome-as-cause), you MUST REJECT it for causal inference.
+- ANTI-HALLUCINATION: NEVER invent counter-evidence not present in the source
+- NEVER add external information without explicitly stating "Based on general knowledge"
+- Be transparent about what comes from the document vs. general knowledge
+- Challenge both factual accuracy and moral validity when applicable
+- If a factor relies on historically falsified claims, genocide, crimes against humanity, or extremist narratives, explicitly label it as "Analytically Rejected Factor"
+- Do NOT simulate false balance: if evidence clearly invalidates a factor, say so directly
+- If the Supporting Agent provided INSUFFICIENT_EVIDENCE, you MUST REJECT the factor
+- If the factor is circular reasoning (outcome-as-cause), you MUST REJECT it for causal inference
 
 CRITICAL: CAUSALITY vs DESCRIPTION
-- If a factor is DESCRIPTIVE (states what happened), mark it: ACCEPTED (DESCRIPTIVE ONLY)
-- If a factor claims CAUSALITY (X caused Y), you MUST verify causal evidence
-- If no causal mechanism is provided, REJECT the causal claim
+- If a factor is DESCRIPTIVE (states what happened/exists), it is VALID unless contradicted
+- Descriptive facts do NOT require causal mechanisms or justification
+- Do NOT reject descriptive facts for "lack of specificity" when none is required
+- If a factor claims CAUSALITY (X caused Y), THEN verify causal evidence
+- If no causal mechanism is provided for a causal claim, REJECT the causal claim (may accept as descriptive)
+
+ILLEGITIMATE REJECTION CRITERIA (DO NOT USE):
+- Do NOT reject for "lack of specificity" if the factor is descriptive
+- Do NOT reject for "lack of mechanism" if the factor is not making a causal claim
+- Do NOT reject for "lack of evidence" if the factor is a simple descriptive fact from the document
+- Do NOT apply epistemic standards inappropriate to the claim type
 
 MANDATORY RESOLUTION:
 You MUST provide a clear resolution at the end in this EXACT format:
@@ -159,8 +203,12 @@ Remember: You MUST end with the RESOLUTION section in the exact format specified
 
         response = await self.llm_client.generate(prompt)
         
+        # Auto-accept descriptive facts in small contexts (skip debate)
+        if not is_causal_claim and is_small_context and not (has_concession or is_circular or not is_grounded):
+            resolution_str = "ACCEPTED"
+            justification = "Descriptive fact from document - accepted without substantive debate"
         # Auto-reject if supporting agent conceded or factor has validation issues
-        if has_concession or is_circular or not is_grounded or not has_evidence:
+        elif has_concession or is_circular or not is_grounded or not has_evidence:
             resolution_str = "REJECTED"
             if has_concession:
                 justification = "Supporting agent conceded - unable to provide documentary evidence"

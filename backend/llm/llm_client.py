@@ -30,6 +30,7 @@ class LLMProvider(Enum):
     OLLAMA = "ollama"
     CEREBRAS = "cerebras"
     GOOGLE = "google"
+    GROQ = "groq"
 
 
 class LLMClient(ABC):
@@ -268,7 +269,7 @@ class CerebrasClient(LLMClient):
 class GoogleClient(LLMClient):
     """Google Gemini API client."""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-pro"):
         if genai is None:
             raise ImportError(
                 "Google Generative AI SDK not available. Install with 'pip install google-generativeai'"
@@ -301,6 +302,43 @@ class GoogleClient(LLMClient):
             return f"[Google Gemini Error: {str(e)}]"
 
 
+class GroqClient(LLMClient):
+    """Groq API client for fast inference."""
+    
+    def __init__(self, api_key: Optional[str] = None, model: str = "llama-3.3-70b-versatile"):
+        self.api_key = api_key or os.getenv("GROQ_API_KEY")
+        if not self.api_key:
+            raise ValueError("Groq API key required. Set GROQ_API_KEY environment variable.")
+        
+        self.model = model
+        self.base_url = "https://api.groq.com/openai/v1/chat/completions"
+    
+    async def generate(self, prompt: str, max_tokens: int = 2000) -> str:
+        """Generate using Groq API."""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.7
+        }
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.post(self.base_url, json=payload, headers=headers)
+                response.raise_for_status()
+                result = response.json()
+                return result['choices'][0]['message']['content']
+            except Exception as e:
+                return f"[Groq Error: {str(e)}]"
+
+
 def create_llm_client(provider: LLMProvider = LLMProvider.HUGGINGFACE, **kwargs) -> LLMClient:
     """Factory function to create LLM client."""
     if provider == LLMProvider.HUGGINGFACE:
@@ -313,5 +351,7 @@ def create_llm_client(provider: LLMProvider = LLMProvider.HUGGINGFACE, **kwargs)
         return CerebrasClient(**kwargs)
     elif provider == LLMProvider.GOOGLE:
         return GoogleClient(**kwargs)
+    elif provider == LLMProvider.GROQ:
+        return GroqClient(**kwargs)
     else:
         raise ValueError(f"Unknown provider: {provider}")

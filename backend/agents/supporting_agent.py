@@ -100,14 +100,42 @@ class SupportingAgent(BaseAgent):
         """Generate supporting arguments for a factor. Creates a structured Claim."""
         self.current_input_text = input_text
         
+        # Detect context size for mode selection
+        context_size = len(input_text.strip())
+        is_small_context = context_size < 500
+        
+        # Build context-aware prompt
+        if is_small_context:
+            mode_instruction = """CONTEXT MODE: SMALL/TRIVIAL STATEMENT
+- You may use general knowledge and common sense
+- The statement is too brief for deep documentary analysis
+- Focus on well-established facts and logical reasoning
+- CRITICAL: Do NOT hallucinate or invent facts
+- If using general knowledge, state it explicitly: "Based on general knowledge..."
+- Still prefer document quotes when available"""
+        else:
+            mode_instruction = """CONTEXT MODE: SUBSTANTIAL DOCUMENT
+- You MUST use ONLY information from the document
+- Do NOT use external knowledge or assumptions
+- Every claim must be backed by document quotes
+- CRITICAL: Do NOT hallucinate or add information not in the document"""
+        
         prompt = f"""You are the Supporting Agent inside Project AETHER.
+
+{mode_instruction}
 Your role is to explore how and why a factor might appear compelling, but you are NOT allowed to legitimize historically false, genocidal, or extremist claims.
 
-STRICT EVIDENCE REQUIREMENTS:
-- You MUST provide specific evidence from the document
-- You MUST explicitly list all assumptions underlying your argument
-- You MUST provide testable predictions if this factor is valid
-- If you cannot provide evidence beyond assertion, you MUST state "INSUFFICIENT_EVIDENCE"
+ANTI-HALLUCINATION RULES:
+- NEVER invent quotes or facts not present in the source
+- NEVER add external information without explicitly stating "Based on general knowledge"
+- If uncertain, state "INSUFFICIENT_EVIDENCE" rather than guessing
+- Be transparent about what comes from the document vs. general knowledge
+
+EVIDENCE REQUIREMENTS:
+- Provide specific evidence (from document or general knowledge, labeled clearly)
+- Explicitly list all assumptions underlying your argument  
+- Provide testable predictions if this factor is valid
+- If you cannot provide evidence, state "INSUFFICIENT_EVIDENCE"
 
 STRICT RULES:
 - You may defend only the mechanism (how belief forms or why someone might rely on this factor), NOT the truth, morality, or legitimacy of any claim that involves crimes against humanity or clearly falsified history.
