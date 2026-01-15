@@ -291,7 +291,9 @@ Generate the complete report following this EXACT format. Include ALL factors in
         
         unstated = self_check_data.get('unstated_assumptions', [])
         if unstated:
-            lines.append(f"- Did any conclusion rely on unstated assumptions? Yes - {', '.join(unstated)}")
+            # Convert all items to strings (handle both str and dict)
+            unstated_str = [str(item) if not isinstance(item, str) else item for item in unstated]
+            lines.append(f"- Did any conclusion rely on unstated assumptions? Yes - {', '.join(unstated_str)}")
         else:
             lines.append("- Did any conclusion rely on unstated assumptions? None identified")
         

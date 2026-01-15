@@ -120,55 +120,37 @@ class SupportingAgent(BaseAgent):
 - Every claim must be backed by document quotes
 - CRITICAL: Do NOT hallucinate or add information not in the document"""
         
-        prompt = f"""You are the Supporting Agent inside Project AETHER.
+        prompt = f"""You are the Supporting Agent in Project AETHER.
 
 {mode_instruction}
-Your role is to explore how and why a factor might appear compelling, but you are NOT allowed to legitimize historically false, genocidal, or extremist claims.
 
-ANTI-HALLUCINATION RULES:
-- NEVER invent quotes or facts not present in the source
-- NEVER add external information without explicitly stating "Based on general knowledge"
-- If uncertain, state "INSUFFICIENT_EVIDENCE" rather than guessing
-- Be transparent about what comes from the document vs. general knowledge
-
-EVIDENCE REQUIREMENTS:
-- Provide specific evidence (from document or general knowledge, labeled clearly)
-- Explicitly list all assumptions underlying your argument  
-- Provide testable predictions if this factor is valid
-- If you cannot provide evidence, state "INSUFFICIENT_EVIDENCE"
-
-STRICT RULES:
-- You may defend only the mechanism (how belief forms or why someone might rely on this factor), NOT the truth, morality, or legitimacy of any claim that involves crimes against humanity or clearly falsified history.
-- If the factor is an "Analytically Rejected Factor", focus solely on explaining how someone could be persuaded by it (misinformation channels, ideology, cognitive bias), while explicitly stating that the underlying claim remains invalid.
+Your role: Explain why this factor is important for understanding the situation.
 
 Factor:
 ID: {factor['id']}
 Name: {factor['name']}
 Description: {factor['description']}
 
-Original Document Context:
-{input_text[:2000]}
+Document (first 1000 chars):
+{input_text[:1000]}
 
-Provide a strong, evidence-based analysis in this EXACT format:
+=== REQUIRED FORMAT ===
 
-EVIDENCE FROM DOCUMENT:
-[List specific quotes or references from the document]
+Provide EXACTLY 2 BULLET POINTS supporting this factor:
 
-ASSUMPTIONS:
-1. [Explicit assumption 1]
-2. [Explicit assumption 2]
-...
+• [First supporting point with specific evidence/quote]
+• [Second supporting point with specific evidence/quote]
 
-ANALYSIS:
-[Why this factor is important for understanding belief formation or outcomes]
-[Evidence or logic for why people might rely on it]
-[Examples or scenarios where this factor shapes interpretation or behavior]
+If no evidence available:
+INSUFFICIENT_EVIDENCE: [Brief explanation]
 
-TESTABLE PREDICTIONS:
-[What would we observe if this factor is valid?]
-
-If you cannot provide specific evidence from the document, respond with:
-INSUFFICIENT_EVIDENCE: [Explanation of why evidence is lacking]
+CRITICAL RULES:
+- Use bullet points (•) for each argument
+- EXACTLY 2 bullets - no more, no less
+- Each bullet: 1-2 sentences maximum
+- Include specific quotes or references
+- Be concise and accurate
+- No hallucination - only use what's in the document
 """
 
         response = await self.llm_client.generate(prompt)
@@ -260,42 +242,41 @@ INSUFFICIENT_EVIDENCE: [Explanation of why evidence is lacking]
         
         claim = self.claims[factor_id]
         
-        prompt = f"""You are the Supporting Agent inside Project AETHER. You have been challenged by the Critic Agent.
+        prompt = f"""You are the Supporting Agent. The Critic challenged your argument.
 
-CRITICAL REQUIREMENT: Your rebuttal MUST include an exact QUOTE from the document or you MUST CONCEDE.
+CRITICAL: You MUST provide an exact QUOTE from the document or CONCEDE.
 
-STRICT RULES:
-1. You MUST provide an exact quote from the document that supports your position
-2. If you cannot provide a quote, you MUST state: "CONCEDE: Unable to provide documentary evidence"
-3. Do NOT redefine the factor
-4. Do NOT shift definitions
-5. Do NOT appeal to "intent" without evidence
-6. Do NOT use assertions without quotes
+Factor: {self.message_bus.get_factor(factor_id).get('name', '')}
 
-Original Factor:
-{self.message_bus.get_factor(factor_id)}
-
-Your Original Claim:
-{claim.content[:1000]}
+Your Original Argument:
+{claim.content[:300]}
 
 Critic's Challenge:
-{critique.get('argument', '')}
+{critique.get('argument', '')[:300]}
 
-Original Document:
-{input_text[:2000]}
+Document (first 1000 chars):
+{input_text[:1000]}
 
-Provide your rebuttal in this format:
+=== REQUIRED FORMAT ===
 
-QUOTE: "exact text from document"
+Provide EXACTLY 2 BULLET POINTS addressing the critique:
 
-REBUTTAL:
-[Your response addressing the critic's concerns using the quote as evidence]
+• [First rebuttal point with specific quote/evidence]
+• [Second rebuttal point addressing critique directly]
 
-If you cannot provide a quote, respond with:
+OR if you cannot provide documentary evidence:
+
 CONCEDE: Unable to provide documentary evidence
-REASON: [Why you cannot provide evidence]
-"""
+REASON: [One sentence explaining why]
 
+CRITICAL RULES:
+- Use bullet points (•) for each rebuttal
+- EXACTLY 2 bullets - no more, no less
+- Each bullet: 1-2 sentences with SPECIFIC QUOTES
+- Address the critique DIRECTLY
+- If no documentary evidence exists, you MUST concede
+- No vague statements - be specific
+"""
         response = await self.llm_client.generate(prompt)
         
         # Check if conceded or no quote provided

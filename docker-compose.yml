@@ -1,0 +1,181 @@
+version: '3.8'
+
+services:
+  # Message Queue
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: aether-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP port
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: aether
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-aether_password}
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - aether-network
+
+  # Redis (for state storage)
+  redis:
+    image: redis:7-alpine
+    container_name: aether-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    networks:
+      - aether-network
+
+  # Factor Extraction Agent
+  factor-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.factor-agent
+    container_name: aether-factor-agent
+    environment:
+      - RABBITMQ_URL=amqp://aether:${RABBITMQ_PASSWORD:-aether_password}@rabbitmq:5672
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=${LLM_PROVIDER:-huggingface}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aether-network
+
+  # Supporting Agent
+  supporting-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.supporting-agent
+    container_name: aether-supporting-agent
+    environment:
+      - RABBITMQ_URL=amqp://aether:${RABBITMQ_PASSWORD:-aether_password}@rabbitmq:5672
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=${LLM_PROVIDER:-huggingface}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aether-network
+
+  # Critic Agent
+  critic-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.critic-agent
+    container_name: aether-critic-agent
+    environment:
+      - RABBITMQ_URL=amqp://aether:${RABBITMQ_PASSWORD:-aether_password}@rabbitmq:5672
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=${LLM_PROVIDER:-huggingface}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aether-network
+
+  # Synthesizer Agent
+  synthesizer-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.synthesizer-agent
+    container_name: aether-synthesizer-agent
+    environment:
+      - RABBITMQ_URL=amqp://aether:${RABBITMQ_PASSWORD:-aether_password}@rabbitmq:5672
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=${LLM_PROVIDER:-huggingface}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aether-network
+
+  # Final Decision Agent
+  final-decision-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.final-decision-agent
+    container_name: aether-final-decision-agent
+    environment:
+      - RABBITMQ_URL=amqp://aether:${RABBITMQ_PASSWORD:-aether_password}@rabbitmq:5672
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=${LLM_PROVIDER:-huggingface}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aether-network
+
+  # Orchestrator Service (API Gateway)
+  orchestrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.orchestrator
+    container_name: aether-orchestrator
+    ports:
+      - "8000:8000"
+    environment:
+      - RABBITMQ_URL=amqp://aether:${RABBITMQ_PASSWORD:-aether_password}@rabbitmq:5672
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aether-network
+
+volumes:
+  rabbitmq_data:
+  redis_data:
+
+networks:
+  aether-network:
+    driver: bridge

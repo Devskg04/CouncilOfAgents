@@ -1,0 +1,131 @@
+# Free Local Multi-Agent Deployment
+# Zero-cost architecture using Docker Compose only
+# No cloud providers, no managed services, no external dependencies
+
+version: '3.8'
+
+services:
+  # Shared volume for SQLite databases
+  # All agents share the same state and message bus databases
+  
+  orchestrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.agents
+    container_name: aether-orchestrator
+    environment:
+      - AGENT_TYPE=orchestrator
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data  # Shared SQLite databases
+      - ./logs:/app/logs  # Shared logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    networks:
+      - aether-network
+
+  factor-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.agents
+    environment:
+      - AGENT_TYPE=factor
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    networks:
+      - aether-network
+
+  supporting-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.agents
+    environment:
+      - AGENT_TYPE=supporting
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    networks:
+      - aether-network
+
+  critic-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.agents
+    environment:
+      - AGENT_TYPE=critic
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8003:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    networks:
+      - aether-network
+
+  synthesizer-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.agents
+    environment:
+      - AGENT_TYPE=synthesizer
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8004:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    networks:
+      - aether-network
+
+  final-decision-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.agents
+    environment:
+      - AGENT_TYPE=final_decision
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8005:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    networks:
+      - aether-network
+
+networks:
+  aether-network:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local
+  logs:
+    driver: local

@@ -14,6 +14,10 @@ import json
 from sse_starlette.sse import EventSourceResponse
 from enum import Enum
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 # Add parent directory to path to access storage module
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 

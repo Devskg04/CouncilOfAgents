@@ -46,8 +46,9 @@ class CriticAgent(BaseAgent):
         return "Challenges factors and support arguments; identifies flaws and analytically rejects invalid claims"
     
     def _setup_subscriptions(self):
-        """Subscribe to support arguments - react automatically."""
+        """Subscribe to support arguments and rebuttals - react automatically."""
         self.message_bus.subscribe(MessageType.SUPPORT_ARGUMENT.value, self._on_support_argument)
+        self.message_bus.subscribe(MessageType.REBUTTAL.value, self._on_rebuttal)
     
     async def _on_support_argument(self, message: Dict):
         """React to a support argument - generate critique automatically."""
@@ -69,6 +70,50 @@ class CriticAgent(BaseAgent):
         
         # Generate critique
         await self.critique_factor(factor, message, input_text)
+        
+        # Mark as handled
+        if message_id:
+            self.message_bus.mark_handled(message_id, self.agent_id)
+    
+    async def _on_rebuttal(self, message: Dict):
+        """React to a rebuttal - re-evaluate the factor if rebuttal is strong."""
+        # Skip if we already handled this
+        message_id = message.get('id')
+        if message_id and self.message_bus.is_handled_by(message_id, self.agent_id):
+            return
+        
+        factor_id = message.get('factor_id')
+        if not factor_id:
+            return
+        
+        # Check if this is a concession (no need to re-evaluate)
+        if message.get('is_concession', False):
+            return  # Concession means factor stays rejected
+        
+        # Get factor and input text
+        factor = self.message_bus.get_factor(factor_id)
+        if not factor:
+            return
+        
+        input_text = self.current_input_text or message.get('input_text_preview', '')
+        
+        # Get the rebuttal content
+        rebuttal_text = message.get('rebuttal', '')
+        
+        # Check if rebuttal is strong enough to warrant re-evaluation
+        # Strong rebuttal = provides new evidence or addresses the critique directly
+        is_strong_rebuttal = (
+            len(rebuttal_text) > 50 and  # Substantial response
+            not message.get('is_concession', False) and  # Not a concession
+            ('evidence' in rebuttal_text.lower() or 
+             'document' in rebuttal_text.lower() or
+             'quote' in rebuttal_text.lower() or
+             len(rebuttal_text) > 150)  # Detailed response
+        )
+        
+        if is_strong_rebuttal:
+            # Re-evaluate the factor with the rebuttal context
+            await self.re_evaluate_after_rebuttal(factor, message, input_text)
         
         # Mark as handled
         if message_id:
@@ -128,78 +173,61 @@ class CriticAgent(BaseAgent):
 - Every critique must reference document content
 - CRITICAL: Do NOT hallucinate or add information not in the document"""
         
-        prompt = f"""You are the Critic Agent inside Project AETHER. Your role is to stress-test each factor and, when appropriate, reject it outright.
+        prompt = f"""You are the Opposition Counsel in Project AETHER. Your role is to present COUNTER-ARGUMENTS to the factor, not to validate it.
 
 {mode_instruction}
 
-STRICT RULES:
-- ANTI-HALLUCINATION: NEVER invent counter-evidence not present in the source
-- NEVER add external information without explicitly stating "Based on general knowledge"
-- Be transparent about what comes from the document vs. general knowledge
-- Challenge both factual accuracy and moral validity when applicable
-- If a factor relies on historically falsified claims, genocide, crimes against humanity, or extremist narratives, explicitly label it as "Analytically Rejected Factor"
-- Do NOT simulate false balance: if evidence clearly invalidates a factor, say so directly
-- If the Supporting Agent provided INSUFFICIENT_EVIDENCE, you MUST REJECT the factor
-- If the factor is circular reasoning (outcome-as-cause), you MUST REJECT it for causal inference
+=== YOUR ROLE: DEBATE OPPONENT ===
 
-CRITICAL: CAUSALITY vs DESCRIPTION
-- If a factor is DESCRIPTIVE (states what happened/exists), it is VALID unless contradicted
-- Descriptive facts do NOT require causal mechanisms or justification
-- Do NOT reject descriptive facts for "lack of specificity" when none is required
-- If a factor claims CAUSALITY (X caused Y), THEN verify causal evidence
-- If no causal mechanism is provided for a causal claim, REJECT the causal claim (may accept as descriptive)
+You are NOT a validator checking authenticity.
+You are a DEBATE OPPONENT presenting the other side of the argument.
 
-ILLEGITIMATE REJECTION CRITERIA (DO NOT USE):
-- Do NOT reject for "lack of specificity" if the factor is descriptive
-- Do NOT reject for "lack of mechanism" if the factor is not making a causal claim
-- Do NOT reject for "lack of evidence" if the factor is a simple descriptive fact from the document
-- Do NOT apply epistemic standards inappropriate to the claim type
+**Your job:**
+1. Present arguments AGAINST this factor's importance or validity
+2. Highlight alternative explanations or perspectives
+3. Point out potential weaknesses, biases, or missing context
+4. Challenge the conclusions drawn from this factor
 
-MANDATORY RESOLUTION:
-You MUST provide a clear resolution at the end in this EXACT format:
-
-RESOLUTION: [ACCEPTED | ACCEPTED (DESCRIPTIVE ONLY) | PARTIALLY_ACCEPTED | REJECTED]
-JUSTIFICATION: [Clear explanation]
-
-For PARTIALLY_ACCEPTED, you MUST also provide:
-SUB-CLAIMS:
-- [Sub-claim 1]: ACCEPTED/REJECTED
-- [Sub-claim 2]: ACCEPTED/REJECTED
-
-For ACCEPTED (DESCRIPTIVE ONLY):
-- State: "This factor describes what happened but does NOT establish causality"
+**You should argue:**
+- "This factor may not be as significant because..."
+- "An alternative explanation could be..."
+- "This overlooks the fact that..."
+- "The evidence doesn't necessarily support this conclusion because..."
 
 Factor:
 ID: {factor['id']}
 Name: {factor['name']}
 Description: {factor['description']}
-Validation Status: {'CIRCULAR - REJECT FOR CAUSALITY' if is_circular else 'UNGROUNDED - MUST REJECT' if not is_grounded else 'Valid for debate'}
+Validation: {'CIRCULAR - REJECT' if is_circular else 'UNGROUNDED - REJECT' if not is_grounded else 'Valid'}
 
-Supporting Agent's Argument:
-{support_argument.get('argument', 'No argument provided')}
-Evidence Provided: {'NO - MUST REJECT' if not has_evidence else 'YES'}
+Supporting Counsel's Argument:
+{support_argument.get('argument', 'No argument')[:500]}
+Evidence: {'NO - REJECT' if not has_evidence else 'YES'}
 
-Original Document Context:
-{input_text[:2000]}
+Document (first 1000 chars):
+{input_text[:1000]}
 
-Provide a critical analysis that:
-1. Identifies specific flaws or weaknesses in the factor
-2. Points out risks, harms, or negative consequences of accepting this factor
-3. Highlights missing assumptions or biases
-4. Suggests alternative, more accurate explanations or mechanisms
-5. Challenges the evidence or logic presented
-6. CRITICAL: If the factor claims causality, verify causal mechanism exists
-7. CRITICAL: Distinguish between descriptive facts and causal claims
-8. States clearly whether this factor should be ACCEPTED, ACCEPTED (DESCRIPTIVE ONLY), PARTIALLY_ACCEPTED, or REJECTED
+=== REQUIRED FORMAT ===
 
-CAUSALITY CHECK:
-- Does the factor claim "X caused Y" or "X led to Y"?
-- If YES: Does the supporting argument provide a causal mechanism?
-- If NO mechanism: REJECT the causal claim (may accept as descriptive)
+Provide EXACTLY 2 BULLET POINTS presenting counter-arguments:
 
-Be thorough and explicit. Challenge the supporting argument point-by-point and avoid diplomatic language when the factor is clearly invalid.
+• [First counter-argument with specific reasoning]
+• [Second counter-argument with alternative perspective]
 
-Remember: You MUST end with the RESOLUTION section in the exact format specified above."""
+RESOLUTION: [ACCEPTED | REJECTED | PARTIALLY_ACCEPTED]
+JUSTIFICATION: [One sentence explaining your position]
+
+CRITICAL RULES:
+- Use bullet points (•) for each counter-argument
+- EXACTLY 2 bullets - no more, no less
+- Each bullet: 1-2 sentences maximum
+- Present OPPOSING ARGUMENTS, not validation checks
+- Challenge INTERPRETATION and SIGNIFICANCE
+- Offer alternative perspectives
+- Be a debate opponent, not a fact-checker
+- Only REJECT if truly invalid (circular/ungrounded/contradicts document)
+- Otherwise, present counter-arguments but may still PARTIALLY_ACCEPT or ACCEPT with reservations
+"""
 
         response = await self.llm_client.generate(prompt)
         
@@ -207,8 +235,9 @@ Remember: You MUST end with the RESOLUTION section in the exact format specified
         if not is_causal_claim and is_small_context and not (has_concession or is_circular or not is_grounded):
             resolution_str = "ACCEPTED"
             justification = "Descriptive fact from document - accepted without substantive debate"
-        # Auto-reject if supporting agent conceded or factor has validation issues
-        elif has_concession or is_circular or not is_grounded or not has_evidence:
+        # Auto-reject ONLY for validation failures or concession (NOT for weak evidence)
+        # This allows LLM to evaluate debates even when evidence is weak
+        elif has_concession or is_circular or not is_grounded:
             resolution_str = "REJECTED"
             if has_concession:
                 justification = "Supporting agent conceded - unable to provide documentary evidence"
@@ -216,8 +245,6 @@ Remember: You MUST end with the RESOLUTION section in the exact format specified
                 justification = f"Circular reasoning detected: {factor_validation.get('circular_note', 'Outcome used as cause')} - REJECTED for causal inference"
             elif not is_grounded:
                 justification = f"Factor not grounded in document: {factor_validation.get('grounding_note', 'No evidence in text')}"
-            elif not has_evidence:
-                justification = "Supporting agent provided insufficient evidence"
             else:
                 justification = "Factor failed validation"
         else:
@@ -289,6 +316,42 @@ Remember: You MUST end with the RESOLUTION section in the exact format specified
                     for claim, status in subclaim_lines
                 ]
         
+        # Parse sub-claims if PARTIALLY_ACCEPTED
+        sub_claims = []
+        if "PARTIALLY_ACCEPTED" in resolution_str:
+            # Extract bullet points from response to create sub-claims
+            lines = response.split('\n')
+            bullet_points = [line.strip() for line in lines if line.strip().startswith('•')]
+            
+            if len(bullet_points) >= 2:
+                # First bullet is typically the accepted part, second is the concern
+                sub_claims = [
+                    {
+                        "claim": bullet_points[0].replace('•', '').strip()[:100],
+                        "status": "ACCEPTED",
+                        "justification": "Valid counter-argument acknowledged"
+                    },
+                    {
+                        "claim": bullet_points[1].replace('•', '').strip()[:100] if len(bullet_points) > 1 else "Additional concerns noted",
+                        "status": "NEEDS_CLARIFICATION",
+                        "justification": "Requires further evidence or clarification"
+                    }
+                ]
+            else:
+                # Fallback: create generic sub-claims
+                sub_claims = [
+                    {
+                        "claim": "Core argument has merit",
+                        "status": "ACCEPTED",
+                        "justification": "Partially valid based on available evidence"
+                    },
+                    {
+                        "claim": "Some aspects require clarification",
+                        "status": "NEEDS_CLARIFICATION",
+                        "justification": "Additional evidence or context needed"
+                    }
+                ]
+        
         # CRITICAL: Validate resolution exists and is valid
         allowed_resolutions = ["ACCEPTED", "PARTIALLY_ACCEPTED", "REJECTED"]
         if resolution_str not in allowed_resolutions:
@@ -356,3 +419,101 @@ Remember: You MUST end with the RESOLUTION section in the exact format specified
         
         await self._publish(critique)
         return critique
+    
+    async def re_evaluate_after_rebuttal(self, factor: Dict, rebuttal_message: Dict, input_text: str) -> Dict:
+        """Re-evaluate a factor after receiving a strong rebuttal."""
+        factor_id = factor['id']
+        rebuttal_text = rebuttal_message.get('rebuttal', '')
+        
+        # Get original critique
+        original_critique = None
+        all_messages = self.message_bus.get_all_messages()
+        for msg in all_messages:
+            if (msg.get('type') == MessageType.CRITIQUE.value and 
+                msg.get('factor_id') == factor_id):
+                original_critique = msg.get('argument', '')
+                break
+        
+        # Build re-evaluation prompt
+        prompt = f"""You are the Critic Agent re-evaluating a factor after receiving a rebuttal.
+
+Factor:
+ID: {factor['id']}
+Name: {factor['name']}
+Description: {factor['description']}
+
+Your Original Critique:
+{original_critique[:500] if original_critique else 'N/A'}
+
+Supporting Agent's Rebuttal:
+{rebuttal_text}
+
+Document (first 1000 chars):
+{input_text[:1000]}
+
+=== YOUR TASK ===
+
+The Supporting Agent has provided a rebuttal. Re-evaluate your critique:
+
+1. **Did the rebuttal provide NEW evidence?** (document quotes, specific references)
+2. **Did the rebuttal address your concerns?** (directly respond to your critique)
+3. **Should you change your decision?**
+
+=== REQUIRED FORMAT (100 words max) ===
+
+REBUTTAL ASSESSMENT:
+[2-3 sentences: Did the rebuttal provide sufficient new evidence or reasoning?]
+
+UPDATED RESOLUTION: [ACCEPTED | PARTIALLY_ACCEPTED | REJECTED | MAINTAIN_ORIGINAL]
+JUSTIFICATION: [One sentence explaining why]
+
+CRITICAL RULES:
+- If rebuttal provides NEW documentary evidence → Consider ACCEPTED or PARTIALLY_ACCEPTED
+- If rebuttal just repeats claims without evidence → MAINTAIN_ORIGINAL (keep rejected)
+- If rebuttal addresses your critique with quotes → Consider changing decision
+- Be fair: if they provided what you asked for, accept it
+- Maximum 100 words!
+"""
+        
+        response = await self.llm_client.generate(prompt)
+        
+        # Parse the updated resolution
+        updated_resolution = "MAINTAIN_ORIGINAL"
+        justification = "No change after rebuttal"
+        
+        if "UPDATED RESOLUTION:" in response:
+            resolution_line = response.split("UPDATED RESOLUTION:")[1].split("\n")[0].strip()
+            if "ACCEPTED" in resolution_line and "PARTIALLY" not in resolution_line:
+                updated_resolution = "ACCEPTED"
+            elif "PARTIALLY_ACCEPTED" in resolution_line:
+                updated_resolution = "PARTIALLY_ACCEPTED"
+            elif "REJECTED" in resolution_line:
+                updated_resolution = "REJECTED"
+        
+        if "JUSTIFICATION:" in response:
+            justification = response.split("JUSTIFICATION:")[1].split("\n")[0].strip()
+        
+        # Only publish if resolution changed
+        if updated_resolution != "MAINTAIN_ORIGINAL":
+            critique_update = {
+                "type": MessageType.CRITIQUE.value,
+                "factor_id": factor_id,
+                "agent_id": self.agent_id,
+                "argument": f"[UPDATED AFTER REBUTTAL] {response[:300]}",
+                "verdict": updated_resolution,
+                "justification": justification,
+                "is_update": True,
+                "timestamp": self._get_timestamp()
+            }
+            
+            await self._publish(critique_update)
+            
+            print(f"✓ Critic re-evaluated factor {factor_id}: {updated_resolution}")
+            print(f"  Reason: {justification}")
+        else:
+            print(f"○ Critic maintains original decision for factor {factor_id}")
+        
+        return {
+            "updated_resolution": updated_resolution,
+            "justification": justification
+        }
