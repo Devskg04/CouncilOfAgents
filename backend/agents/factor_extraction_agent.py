@@ -81,8 +81,15 @@ For complex documents: Extract 3-8 factors.
 Document:
 {input_text}
 
+CRITICAL OUTPUT RULES:
+- Return ONLY a JSON array
+- Each factor must have: id, quote, name, description
+- description must be PLAIN TEXT (not JSON, not nested objects)
+- quote must be exact text from document
+- name must be a brief title
+
 Output JSON:
-[{{"id": 1, "quote": "exact full sentence", "name": "Complete world-state", "description": "What happened/exists"}}]
+[{{"id": 1, "quote": "exact full sentence from document", "name": "Brief factor title", "description": "Plain text description of what happened or exists"}}]
 """
 
         response = await self.llm_client.generate(prompt)

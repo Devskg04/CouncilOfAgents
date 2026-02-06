@@ -87,75 +87,143 @@ function extractDebateMessages(
     const critique = debateData.critique;
     const rebuttal = debateData.rebuttal;
 
-    // Add supporting argument (round 1)
+    // Add supporting argument - split bullets into separate rounds
     if (support) {
         const supportMsg = allMessages.find(
             m => m.type === 'SUPPORT_ARGUMENT' && m.factor_id === factorId
         );
 
-        messages.push({
-            id: `${factorId}_support_${messageCounter++}`,
-            agent: 'SupportingAgent',
-            content: typeof support === 'string' ? support : (support.argument || support.content || ''),
-            timestamp: supportMsg?.timestamp ? new Date(supportMsg.timestamp) : new Date(),
-            round: 1,
-        });
-    }
+        const supportText = typeof support === 'string' ? support : (support.argument || support.content || '');
+        const bullets = supportText.split('\n').filter((line: string) => line.trim().startsWith('•'));
 
-    // Add critique (round 1) - get the FIRST critique (not marked as update)
-    if (critique) {
-        const critiqueMessages = allMessages.filter(
-            m => m.type === 'CRITIQUE' && m.factor_id === factorId
-        );
-
-        // Find the original critique (not an update)
-        const originalCritique = critiqueMessages.find(m => !m.is_update) || critiqueMessages[0];
-
-        if (originalCritique) {
+        if (bullets.length > 0) {
+            // Each bullet becomes its own round
+            bullets.forEach((bullet: string, index: number) => {
+                messages.push({
+                    id: `${factorId}_support_${messageCounter++}`,
+                    agent: 'SupportingAgent',
+                    content: bullet.trim(),
+                    timestamp: supportMsg?.timestamp ? new Date(supportMsg.timestamp) : new Date(),
+                    round: index + 1,
+                });
+            });
+        } else {
+            // No bullets, use full text as round 1
             messages.push({
-                id: `${factorId}_critique_${messageCounter++}`,
-                agent: 'CriticAgent',
-                content: typeof critique === 'string' ? critique : (critique.argument || critique.content || ''),
-                timestamp: originalCritique?.timestamp ? new Date(originalCritique.timestamp) : new Date(),
+                id: `${factorId}_support_${messageCounter++}`,
+                agent: 'SupportingAgent',
+                content: supportText,
+                timestamp: supportMsg?.timestamp ? new Date(supportMsg.timestamp) : new Date(),
                 round: 1,
             });
         }
     }
 
-    // Add rebuttal (round 2) - only if it's not a concession
+    // Add critique - split bullets into separate rounds matching support rounds
+    if (critique) {
+        const critiqueMessages = allMessages.filter(
+            m => m.type === 'CRITIQUE' && m.factor_id === factorId
+        );
+
+        const originalCritique = critiqueMessages.find(m => !m.is_update) || critiqueMessages[0];
+
+        if (originalCritique) {
+            const critiqueText = typeof critique === 'string' ? critique : (critique.argument || critique.content || '');
+            const bullets = critiqueText.split('\n').filter((line: string) => line.trim().startsWith('•'));
+
+            if (bullets.length > 0) {
+                // Each bullet becomes its own round
+                bullets.forEach((bullet: string, index: number) => {
+                    messages.push({
+                        id: `${factorId}_critique_${messageCounter++}`,
+                        agent: 'CriticAgent',
+                        content: bullet.trim(),
+                        timestamp: originalCritique?.timestamp ? new Date(originalCritique.timestamp) : new Date(),
+                        round: index + 1,
+                    });
+                });
+            } else {
+                // No bullets, use full text as round 1
+                messages.push({
+                    id: `${factorId}_critique_${messageCounter++}`,
+                    agent: 'CriticAgent',
+                    content: critiqueText,
+                    timestamp: originalCritique?.timestamp ? new Date(originalCritique.timestamp) : new Date(),
+                    round: 1,
+                });
+            }
+        }
+    }
+
+    // Add rebuttal - split bullets into separate rounds
     if (rebuttal) {
         const rebuttalMsg = allMessages.find(
             m => m.type === 'REBUTTAL' && m.factor_id === factorId
         );
 
-        // Skip if this is a concession (no meaningful argument to show)
         const isConcession = rebuttalMsg?.is_concession ||
             (typeof rebuttal === 'string' && rebuttal.toUpperCase().includes('CONCEDE'));
 
         if (!isConcession) {
-            messages.push({
-                id: `${factorId}_rebuttal_${messageCounter++}`,
-                agent: 'SupportingAgent',
-                content: typeof rebuttal === 'string' ? rebuttal : (rebuttal.rebuttal || rebuttal.content || ''),
-                timestamp: rebuttalMsg?.timestamp ? new Date(rebuttalMsg.timestamp) : new Date(),
-                round: 2,
-            });
+            const rebuttalText = typeof rebuttal === 'string' ? rebuttal : (rebuttal.rebuttal || rebuttal.content || '');
+            const bullets = rebuttalText.split('\n').filter((line: string) => line.trim().startsWith('•'));
+
+            // Get the max round from previous messages to continue numbering
+            const maxRound = Math.max(...messages.map(m => m.round || 1), 0);
+
+            if (bullets.length > 0) {
+                bullets.forEach((bullet: string, index: number) => {
+                    messages.push({
+                        id: `${factorId}_rebuttal_${messageCounter++}`,
+                        agent: 'SupportingAgent',
+                        content: bullet.trim(),
+                        timestamp: rebuttalMsg?.timestamp ? new Date(rebuttalMsg.timestamp) : new Date(),
+                        round: maxRound + index + 1,
+                    });
+                });
+            } else {
+                messages.push({
+                    id: `${factorId}_rebuttal_${messageCounter++}`,
+                    agent: 'SupportingAgent',
+                    content: rebuttalText,
+                    timestamp: rebuttalMsg?.timestamp ? new Date(rebuttalMsg.timestamp) : new Date(),
+                    round: maxRound + 1,
+                });
+            }
         }
     }
 
-    // Add critic's re-evaluation (round 2) - if it exists
+    // Add critic's re-evaluation - split bullets into separate rounds
     const critiqueUpdate = allMessages.find(
         m => m.type === 'CRITIQUE' && m.factor_id === factorId && m.is_update === true
     );
 
     if (critiqueUpdate) {
-        messages.push({
-            id: `${factorId}_critique_update_${messageCounter++}`,
-            agent: 'CriticAgent',
-            content: critiqueUpdate.argument || '',
-            timestamp: critiqueUpdate.timestamp ? new Date(critiqueUpdate.timestamp) : new Date(),
-            round: 2,
-        });
+        const updateText = critiqueUpdate.argument || '';
+        const bullets = updateText.split('\n').filter((line: string) => line.trim().startsWith('•'));
+
+        // Get the max round from previous messages to continue numbering
+        const maxRound = Math.max(...messages.map(m => m.round || 1), 0);
+
+        if (bullets.length > 0) {
+            bullets.forEach((bullet: string, index: number) => {
+                messages.push({
+                    id: `${factorId}_critique_update_${messageCounter++}`,
+                    agent: 'CriticAgent',
+                    content: bullet.trim(),
+                    timestamp: critiqueUpdate.timestamp ? new Date(critiqueUpdate.timestamp) : new Date(),
+                    round: maxRound + index + 1,
+                });
+            });
+        } else {
+            messages.push({
+                id: `${factorId}_critique_update_${messageCounter++}`,
+                agent: 'CriticAgent',
+                content: updateText,
+                timestamp: critiqueUpdate.timestamp ? new Date(critiqueUpdate.timestamp) : new Date(),
+                round: maxRound + 1,
+            });
+        }
     }
 
     return messages;
